@@ -1,33 +1,63 @@
-The logs routes define the API endpoints for indexing and searching logs. These routes are protected, requiring user authentication and admin privileges.
+const elasticsearch = require("elasticsearch");
+// Create an Elasticsearch client
+const client = new elasticsearch.Client({
+  host: "http://localhost:9200", // Elasticsearch server address
+  log: "trace", // log level
+});
 
-In all APIs, you have to pass the accessToken in the header of the request you got while logging in for authorization.
+// Function to index multiple logs
+async function indexLogs(index, logDataArray) {
+  try {
+    const body = logDataArray.flatMap((logData) => [
+      { index: { _index: index } },
+      logData,
+    ]);
+    const response = await client.bulk({ body });
+    return response;
+  } catch (error) {
+    console.error(`Error indexing logs:`, error);
+    return error;
+  }
+}
 
-Ingest a New Log:
+async function searchLogs(index, timestampFilter, fields) {
+  try {
+    const mustClauses = [];
+    const rangeFilter = {};
 
-URL: POST http://localhost:3000/logs/index
+    fields.forEach(({ fieldName, fieldValue }) => {
+      mustClauses.push({ term: { [`${fieldName}.keyword`]: fieldValue } });
+    });
 
-Description: Add new Logs to the dataset.
+    if (Object.keys(timestampFilter).length > 0) {
+      rangeFilter["timestamp"] = {
+        gte: timestampFilter.startTime,
+        lte: timestampFilter.endTime,
+      };
+    }
 
-Sample Request: POST http://localhost:3000/logs/index
+    const query = {
+      bool: {
+        must: mustClauses,
+      },
+    };
 
-Example :
+    if (Object.keys(rangeFilter).length > 0) {
+      query.bool.must.push({ range: rangeFilter });
+    }
 
-Sample Input Body { "indexName": "sunday_logs", "logDataArray": [ { "timestamp": "2023-09-15T10:00:00Z", "level": "error", "message": "Failed to complete the function 2", "resourceId": "server-1235", "traceId": "abc-xyz-124", "spanId": "span-987", "commit": "5e5342a", "metadata": { "parentResourceId": "server-0987" } } ] }
+    const response = await client.search({
+      index: index,
+      body: {
+        query: query,
+      },
+    });
 
-Returned Object : { "errors": false, "took": 70, "items": [ { "index": { "_index": "sunday_logs", "_id": "GHHe54sBocmRxC7w9foB", "_version": 1, "result": "created", "_shards": { "total": 2, "successful": 1, "failed": 0 }, "_seq_no": 6, "_primary_term": 2, "status": 201 } } ] }
+    return response.hits.hits;
+  } catch (error) {
+    console.error("Error searching logs:", error);
+    return error;
+  }
+}
 
-Search a Record:
-
-URL: GET http://localhost:3000/logs/search
-
-Description: Search a/multiple record from the dataset.
-
-Sample Request:
-
-GET http://localhost:3000/logs/search
-
-Sample Input Body if we only want to search with a field { "indexName": "sunday_logs", "fieldsToSearch": [ { "fieldName": "level", "fieldValue": "error" } ] }
-
-Sample Input Body if we only want to search with the combination of fields and Timestamp { "indexName": "sunday_logs", "fieldsToSearch": [ { "fieldName": "level", "fieldValue": "error" } ] "timestampFilter": { "startTime": "2023-09-15T09:00:00Z", "endTime": "2023-09-15T10:00:00Z" } }
-
-Returned Object : [ { "_index": "sunday_logs", "_id": "L-9P5osB6qYzKbs9Byk-", "_score": 1.2076393, "_source": { "timestamp": "2023-09-15T10:00:00Z", "level": "error", "message": "Failed to complete the function 2", "resourceId": "server-1235", "traceId": "abc-xyz-124", "spanId": "span-987", "commit": "5e5342a", "metadata": { "parentResourceId": "server-0987" } } }, { "_index": "sunday_logs", "_id": "MO9_5osB6qYzKbs9TCmP", "_score": 1.2076393, "_source": { "timestamp": "2023-09-15T10:00:00Z", "level": "error", "message": "Failed to complete the function 2", "resourceId": "server-1235", "traceId": "abc-xyz-124", "spanId": "span-987", "commit": "5e5342a", "metadata": { "parentResourceId": "server-0987" } } }, { "_index": "sunday_logs", "_id": "F3HX54sBocmRxC7wJfor", "_score": 1.2076393, "_source": { "timestamp": "2023-09-15T10:00:00Z", "level": "error", "message": "Failed to complete the function 2", "resourceId": "server-1235", "traceId": "abc-xyz-124", "spanId": "span-987", "commit": "5e5342a", "metadata": { "parentResourceId": "server-0987" } } }, { "_index": "sunday_logs", "_id": "GHHe54sBocmRxC7w9foB", "_score": 1.2076393, "_source": { "timestamp": "2023-09-15T10:00:00Z", "level": "error", "message": "Failed to complete the function 2", "resourceId": "server-1235", "traceId": "abc-xyz-124", "spanId": "span-987", "commit": "5e5342a", "metadata": { "parentResourceId": "server-0987" } } } ]
+module.exports = { indexLogs, searchLogs };
